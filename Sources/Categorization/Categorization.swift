@@ -15,19 +15,20 @@ public typealias Predicate<Element> = (Element)->Bool
 @objcMembers open class Categorization<Element: Comparable>: NSObject {
     
     /// Array of Elements to categorized
-    public var items: Array<Element>!
+    dynamic public var items: Array<Element>!
     
     /// Array of Categories
-    public var categories: [Category<Element>]!
+    dynamic public var categories: [Category<Element>]!
     
     /// A block predicate to determine what Categories are visible in a User Interface
-    public var visibleCategoryPredicate: ((Category<Element>) -> Bool)?
+    dynamic public var visibleCategoryPredicate: ((Category<Element>) -> Bool)?
     
     /// A block predicate to apply an additonal filter to the categorized elements
-    public var filterPredicate : Predicate<Element> = {element in return true}
+    dynamic public var filterPredicate : Predicate<Element> = {element in return true}
     
+    @objc dynamic public var selectedCategoryIndex: Int = -1
     
-    private var categoryTitles: [String: Category<Element>]!
+    dynamic private var categoryTitles: [String: Category<Element>]!
     
     public var isSorted: Bool = false {
         didSet {
@@ -141,6 +142,26 @@ public typealias Predicate<Element> = (Element)->Bool
     }
     
     
+    /// Return Array of Items part of a particular Category
+    ///
+    /// - parameter index: position in the Categories Array
+    ///
+    dynamic open var itemsForSelectedCategory: [Element] {
+        var items = [Element]()
+        if  selectedCategoryIndex != -1,
+            let categoryPredicate = categories[selectedCategoryIndex].predicate {
+            let finalPredicate: Predicate = {element in self.filterPredicate (element) && categoryPredicate(element)}
+            items = self.items.filter(finalPredicate)
+        }
+        if self.isSorted {
+            do {
+                try items.sort(by: sortPredicate!)
+            } catch {}
+        }
+        return items
+    }
+    
+    
     /// Update a particular Item
     ///
     /// - parameter itemInfo: Item with new information to update
@@ -187,6 +208,10 @@ public typealias Predicate<Element> = (Element)->Bool
     ///
     open var numberOfVisibleCategories: Int {
         return self.visibleCategories.count
+    }
+    
+    class func keyPathsForValuesAffectingItemsforSelectedCategory() -> Set<AnyHashable>? {
+        return Set<AnyHashable>(["items","selectedCategoryIndex","categories"])
     }
     
 }

@@ -15,33 +15,33 @@ public typealias CategoryDef = Category
  @class Category
  Categories represent a categorization/grouping of Elements.  Category allow to present the items categorized information based in defined filter criterias.  Example of Categories in the Torrent world could be Active, Downloading, Tracker, etc.
  */
-public class Category<Element:Comparable>: NSObject {
+@objcMembers public class Category<Element:Comparable>: NSObject {
 
     /*!
      @property title Title to identify Category. Example: "All", "Downloading", "Seeding", "Stopped", etc.
      */
-    public var title = ""
+    @objc dynamic public var title = ""
     
     /*!
      @property predicate Preedicate with the corresponding Category filter criteria
      */
     
-    public var predicate: Predicate<Element>!
+    dynamic public var predicate: Predicate<Element>!
 
     /*!
      @property alwaysVisible  This property determine if the Category will be visible in the final user interface, even if there is not items that satisfy the corresponding Group filter criteria.
      */
-    public var isAlwaysVisible = false
+    @objc dynamic public var isAlwaysVisible = true
    
     /*!
      @property index Categorys can have an index number to help the arragement of multiple Categoriess
      */
-    public var sortIndex = 0
+    @objc dynamic public var sortIndex = 0
     
     /*!
      initializer
      */
-    public override init() {
+    @objc public override init() {
         super.init()
         self.title = ""
         self.predicate = {_ in return true}
