@@ -15,45 +15,94 @@ public typealias Predicate<Element> = (Element)->Bool
 @objcMembers open class Categorization<Element: Comparable>: NSObject {
     
     /// Array of Elements to categorized
-    dynamic public var items: Array<Element>!
+    dynamic public var items: Array<Element> {
+        didSet {
+            self.itemsForSelectedCategory = recategorizeItems()
+        }
+    }
+
+    
+    dynamic public var itemsForSelectedCategory: Array<Element>!
+    
     
     /// Array of Categories
     dynamic public var categories: [Category<Element>]!
     
+    
     /// A block predicate to determine what Categories are visible in a User Interface
     dynamic public var visibleCategoryPredicate: ((Category<Element>) -> Bool)?
     
+    
     /// A block predicate to apply an additonal filter to the categorized elements
-    dynamic public var filterPredicate : Predicate<Element> = {element in return true}
-    
-    @objc dynamic public var selectedCategoryIndex: Int = -1
-    
-    dynamic private var categoryTitles: [String: Category<Element>]!
-    
-    public var isSorted: Bool = false {
+    dynamic public var filterPredicate : Predicate<Element> = {element in return true} {
         didSet {
-            if sortPredicate == nil {
-                sortPredicate = { $0 < $1}
+            if selectedCategoryIndex != -1,
+                let categoryPredicate = categories[selectedCategoryIndex].predicate {
+                finalPredicate = {element in self.filterPredicate(element) && categoryPredicate(element) }
+            } else {
+                finalPredicate = {element in self.filterPredicate(element) }
             }
         }
     }
     
-    public var sortPredicate: ((Element, Element) throws -> Bool)?
+    dynamic public var finalPredicate: Predicate<Element>!
+
+    @objc dynamic public var selectedCategoryIndex: Int = -1 {
+        didSet {
+            if  selectedCategoryIndex != -1,
+                let categoryPredicate = categories[selectedCategoryIndex].predicate {
+                finalPredicate = {element in self.filterPredicate(element) && categoryPredicate(element) }
+            } else {
+                finalPredicate = {element in self.filterPredicate(element) }
+            }
+            self.itemsForSelectedCategory = recategorizeItems()
+        }
+    }
+    
+    dynamic private var categoryTitles: [String: Category<Element>]!
+    
+    @objc dynamic public var isSorted: Bool = false {
+        didSet {
+            if self.sortPredicate == nil {
+                self.sortPredicate = { $0 < $1}
+            }
+            try? itemsForSelectedCategory.sort(by: self.sortPredicate!)
+        }
+    }
+    
+    public var sortPredicate: ((Element, Element) throws -> Bool)? {
+        didSet {
+            if sortPredicate != nil {
+                try? itemsForSelectedCategory.sort(by: self.sortPredicate!)
+            }
+        }
+    }
+    
     
     /// Update categorized items
     ///
     /// - parameter items: Array of Elements to update the items categorized
     ///
     open func updateItems(withArray items: [Element]) {
-        
         for object in items {
             if let index = self.items.firstIndex(of: object) {
                 self.items[index] = object
             } else {
-                self.items.append(object)
+                self.items.insert(object, at: 0)
+            }
+            if let index1 = self.itemsForSelectedCategory.firstIndex(of: object) {
+                if finalPredicate(object) {
+                    self.itemsForSelectedCategory[index1] = object
+                } else {
+                    self.itemsForSelectedCategory.remove(at: index1)
+                }
+            } else {
+                self.itemsForSelectedCategory.insert(object, at: 0)
             }
         }
+        
     }
+    
     
     /// Return number of Items in on particular category
     ///
@@ -146,16 +195,11 @@ public typealias Predicate<Element> = (Element)->Bool
     ///
     /// - parameter index: position in the Categories Array
     ///
-    dynamic open var itemsForSelectedCategory: [Element] {
-        var items = [Element]()
-        if  selectedCategoryIndex != -1,
-            let categoryPredicate = categories[selectedCategoryIndex].predicate {
-            let finalPredicate: Predicate = {element in self.filterPredicate (element) && categoryPredicate(element)}
-            items = self.items.filter(finalPredicate)
-        }
+    open func recategorizeItems() -> Array<Element> {
+        var items = self.items.filter(self.finalPredicate)
         if self.isSorted {
             do {
-                try items.sort(by: sortPredicate!)
+                try items.sort(by: self.sortPredicate!)
             } catch {}
         }
         return items
@@ -170,16 +214,20 @@ public typealias Predicate<Element> = (Element)->Bool
         if let index = items.firstIndex(of: itemInfo) {
             items[index] = itemInfo
         }
+        if let index1 = itemsForSelectedCategory.firstIndex(of: itemInfo) {
+            itemsForSelectedCategory[index1] = itemInfo
+        }
     }
     
     
     /// Initializer
     public override init() {
+        self.items = []
         super.init()
         self.categories = [Category]()
-        self.items = []
         self.filterPredicate  = {element in return true}
     }
+    
     
     /// Initializer
     ///
@@ -187,8 +235,8 @@ public typealias Predicate<Element> = (Element)->Bool
     /// - parameter categories: Array of Categories
     ///
     public init(withItems items:[Element], withCategories categories: [Category<Element>], andUserFilter filter: @escaping Predicate<Element> = {element in return true}) {
-        super.init()
         self.items = items
+        super.init()
         self.categories = categories
         categoryTitles = [:]
         for category in categories {
@@ -196,6 +244,7 @@ public typealias Predicate<Element> = (Element)->Bool
         }
         self.filterPredicate  = filter
     }
+    
     
     /// Return Array of visible Categories
     ///
@@ -211,7 +260,7 @@ public typealias Predicate<Element> = (Element)->Bool
     }
     
     class func keyPathsForValuesAffectingItemsforSelectedCategory() -> Set<AnyHashable>? {
-        return Set<AnyHashable>(["items","selectedCategoryIndex","categories"])
+        return Set<AnyHashable>(["items","selectedCategoryIndex","categories","sortPredicate","isSorted"])
     }
     
 }
