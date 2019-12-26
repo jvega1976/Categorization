@@ -127,12 +127,18 @@ public typealias Predicate<Element> = (Element)->Bool
     public func registerTableView(_ tableView: UITableView, forSection section: Int) {
         tableViews.append((tableView,section))
     }
+    
+    public func deregisterTableView(_ tableView: UITableView, forSection section: Int) {
+        tableViews.removeAll(where: {$0 == (tableView,section) })
+    }
+    
     #else
     private var tableViews = [(NSTableView,IndexSet)]()
     
     public func registerTableView(_ tableView: NSTableView, forColumns columns: IndexSet) {
-        tableViews.append((tableView,columns))
+        tableViews.removeAll(where: {$0 == (tableView,columns) })
     }
+    
     #endif
     
     /// Set (initialize) categorized items
