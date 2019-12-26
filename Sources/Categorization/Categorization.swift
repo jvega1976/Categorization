@@ -136,7 +136,11 @@ public typealias Predicate<Element> = (Element)->Bool
     private var tableViews = [(NSTableView,IndexSet)]()
     
     public func registerTableView(_ tableView: NSTableView, forColumns columns: IndexSet) {
-        tableViews.removeAll(where: {$0 == (tableView,columns) })
+        tableViews.append((tableView,columns))
+    }
+    
+    public func deregisterTableView(_ tableView: NSTableView, forColumns columns: IndexSet) {
+        tableViews.removeAll(where: {$0 == (tableView, columns) })
     }
     
     #endif
