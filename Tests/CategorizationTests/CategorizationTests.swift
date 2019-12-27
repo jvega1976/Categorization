@@ -52,7 +52,7 @@ final class CategorizationTests: XCTestCase {
         print(array.contains(object4))
         
         let p1 = NSPredicate(format: "field2 == true")
-        let category1 = UICategorization.Ca
+        /*let category1 = UICategorization.Ca
         let p2 = NSPredicate(format: "field2 == false")
         let category2 = NSCategory(withTitle: "Cat2", filterPredicate: p2, sortIndex: 1, isAlwaysVisible: true)
         let categories = Categories(categories: [category1,category2])
@@ -62,7 +62,7 @@ final class CategorizationTests: XCTestCase {
         let index = categorization.items.firstIndex(of: object4)!
         print(index)
         print(categorization.items as Any)
-        XCTAssertEqual(Categorization().text, "Hello, World!")
+        XCTAssertEqual(Categorization().text, "Hello, World!") */
     }
 
     static var allTests = [
