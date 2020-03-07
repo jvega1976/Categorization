@@ -7,8 +7,7 @@
 
 import Foundation
 
-
-@objcMembers public class CompoundCategory<Element: Comparable>: Category<Element> {
+@objcMembers public class CompoundCategory<Element: Categorizable>: Category<Element> {
     
     public typealias SubCategory = Category<Element>
     public var subCategories = Array<SubCategory>()
@@ -23,7 +22,7 @@ import Foundation
         self.isAllowingDuplicates = allowDuplicates ?? true
     }
     
-    dynamic override open var predicate: Predicate {
+    override open var predicate: Predicate {
         return { element in
                     return self.subCategories.reduce(false, { prev, category in
                         prev || category.predicate(element) })

@@ -8,6 +8,7 @@
 
 
 import Foundation
+import Combine
 #if os(iOS) || targetEnvironment(macCatalyst)
 import UIKit
 #else
@@ -37,39 +38,37 @@ import AppKit
 }
 #endif
 
-@objc public protocol CategoryElement where Self: AnyObject {
-    @objc func update(with item: AnyObject)
+public protocol CategoryItem {
+    
+    func update(with item: Self)
 }
 
+public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiable & CategoryItem
 
 /// Categorization Class
-@objcMembers open class Categorization<Element: AnyObject & Comparable & Hashable>: NSObject {
+
+@objcMembers open class Categorization<Element: Categorizable>: NSObject, ObservableObject  {
+    
 
     public typealias Predicate = (Element) ->Bool
     
     /// Array of Elements to categorized
-    dynamic private var _items: Array<Element> = [Element]()
-    dynamic open var items: Array<Element> {
-        return _items
-    }
+    @Published public private (set) var items: Array<Element> = [Element]()
     
     /// Array of items filtered and sorted according to selected category, user filter predidcate
     /// and sort predicate
-    private var _itemsForSelectedCategory: Array<Element> = []
-    @objc open var itemsForSelectedCategory: Array<AnyObject>  {
-        return _itemsForSelectedCategory
-    }
+    @Published public private (set) var itemsForSelectedCategory: Array<Element> = [] 
     
     /// Array of Categories
-    dynamic open var categories: [Category<Element>]!
+    @Published open var categories: [Category<Element>]!
     
     
     /// A block predicate to determine what Categories are visible in a User Interface
-    dynamic open var visibleCategoryPredicate: ((Category<Element>) -> Bool)?
+    open var visibleCategoryPredicate: ((Category<Element>) -> Bool)?
     
     
     /// A block predicate to apply an additonal filter to the categorized elements
-    dynamic open var filterPredicate : Predicate = {element in return true} {
+    open var filterPredicate : Predicate = {element in return true} {
         didSet {
             if selectedCategoryIndex != -1 {
                 let categoryPredicate = categories[selectedCategoryIndex].predicate
@@ -83,11 +82,13 @@ import AppKit
     
     
     /// Variable to establish the final predicate to apply
-    dynamic private var finalPredicate: Predicate!
+    lazy private var finalPredicate: ((Element) ->Bool) =  {
+        return self.filterPredicate
+    }()
     
     
     /// Selected Category Index
-    @objc dynamic open var selectedCategoryIndex: Int = -1 {
+    @Published open var selectedCategoryIndex: Int = -1 {
         didSet {
             if  selectedCategoryIndex != -1 {
                 let categoryPredicate = categories[selectedCategoryIndex].predicate
@@ -99,9 +100,13 @@ import AppKit
         }
     }
     
+    @objc open func selectCategory(withIndex index: Int) {
+        self.selectedCategoryIndex = index
+    }
+    
     
     /// Array with category Titles
-    dynamic private var categoryTitles: [String: Category<Element>]!
+    private var categoryTitles: [String: Category<Element>]!
     
     
     /// Boolean to establish if categorized items should be sorted
@@ -111,8 +116,8 @@ import AppKit
                 if self.sortPredicate == nil {
                     self.sortPredicate = { $0 < $1}
                 }
-                self.willChangeValue(forKey: #keyPath(itemsForSelectedCategory))
-                try? self._itemsForSelectedCategory.sort(by: self.sortPredicate!)
+                //self.willChangeValue(for: \.itemsForSelectedCategory)
+                try? self.itemsForSelectedCategory.sort(by: self.sortPredicate!)
                 #if os(iOS) || targetEnvironment(macCatalyst)
                 for (table,section) in tableViews {
                     table.reloadSections(IndexSet(integer: section), with: .automatic)
@@ -130,18 +135,22 @@ import AppKit
                     }
                 }
                 #endif
-                self.didChangeValue(forKey: #keyPath(itemsForSelectedCategory))
+                //self.didChangeValue(for: \.itemsForSelectedCategory)
             }
         }
     }
     
     
     /// Block predicate with condition to sort categorized items
-    dynamic open var sortPredicate: ((Element, Element) throws -> Bool)? {
+    open var sortPredicate: ((Element, Element) throws -> Bool)?  {
         didSet {
             if sortPredicate != nil && self.isSorted {
-                self.willChangeValue(forKey: #keyPath(itemsForSelectedCategory))
-                self._itemsForSelectedCategory = self.sortItems(self._itemsForSelectedCategory)
+                //self.willChangeValue(for: \.itemsForSelectedCategory
+                let tempItems = try? self.itemsForSelectedCategory.sorted(by: self.sortPredicate!)
+                self.itemsForSelectedCategory = []
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.005, qos: .userInteractive) {
+                    self.itemsForSelectedCategory = tempItems!
+                }
                 #if os(iOS) || targetEnvironment(macCatalyst)
                 for (table,section) in tableViews {
                     table.reloadSections(IndexSet(integer: section), with: .automatic)
@@ -159,7 +168,7 @@ import AppKit
                     }
                 }
                 #endif
-                self.didChangeValue(forKey: #keyPath(itemsForSelectedCategory))
+                //self.didChangeValue(for: \.itemsForSelectedCategory)
             }
         }
     }
@@ -201,7 +210,7 @@ import AppKit
                         }
                     }
                 }
-                _selectedObjects[i] = _itemsForSelectedCategory[i]
+                _selectedObjects[i] = itemsForSelectedCategory[i]
             }
             #endif
         }
@@ -214,7 +223,7 @@ import AppKit
     
     public func registerTableView(_ tableView: UITableView, forSection section: Int) {
         tableViews.append((tableView,section))
-        if !(self._itemsForSelectedCategory.isEmpty) {
+        if !(self.itemsForSelectedCategory.isEmpty) {
             tableView.reloadData()
         }
     }
@@ -229,7 +238,7 @@ import AppKit
     public func registerTableView(_ tableView: NSTableView, forColumns columns: IndexSet) {
         tableViews.append((tableView,columns))
         tableView.bind(.selectionIndexes, to: self, withKeyPath: #keyPath(selectionIndexes), options: [NSBindingOption.validatesImmediately: true])
-        if !(self._itemsForSelectedCategory.isEmpty) {
+        if !(self.itemsForSelectedCategory.isEmpty) {
             tableView.reloadData()
             self.selectionIndexes = tableView.selectedRowIndexes
             for index in self.selectionIndexes {
@@ -254,7 +263,7 @@ import AppKit
     /// - parameter items: Array of Elements to categorize
     ///
     open func setItems(_ items: [Element]) {
-        self._items = items
+        self.items = items
         self.recategorizeItems()
     }
     
@@ -264,42 +273,41 @@ import AppKit
     /// - parameter items: Array of Elements to update the items categorized
     ///
     open func updateItems(with items: [Element]) {
-        if self._items.isEmpty {
-            self._items = items
+        if self.items.isEmpty {
+            self.items = items
             self.recategorizeItems()
         } else {
             for object in items {
                 if let index = self.items.firstIndex(of: object) {
-                    self._items[index] = object
+                    self.items[index] = object
                 } else {
-                    self._items.insert(object, at: 0)
+                    self.items.insert(object, at: 0)
                 }
-                if let index1 = self._itemsForSelectedCategory.firstIndex(of: object) {
+                if let index1 = self.itemsForSelectedCategory.firstIndex(of: object) {
                     var index2: Int?
                     if self.finalPredicate(object) {
-                        self.willChange(.setting, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
-                        self._itemsForSelectedCategory[index1] = object
+                        //self.willChange(.setting, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
+                        self.itemsForSelectedCategory[index1].update(with: object)
                         if self.isSorted,
-                            index1 < self._itemsForSelectedCategory.count - 1,
-                            self._itemsForSelectedCategory.count > 1,
-                            !((try? self.sortPredicate!(object,self._itemsForSelectedCategory[self._itemsForSelectedCategory.index(after: index1)])) ?? true) {
-                            try? self._itemsForSelectedCategory.sort(by: self.sortPredicate!)
-                            index2 = self._itemsForSelectedCategory.firstIndex(of: object)
-                            let indexes = IndexSet(integersIn: index1 < index2! ? index1...index2! : index2!...index1)
-                            self.willChange(.replacement, valuesAt:
-                                indexes, forKey: #keyPath(itemsForSelectedCategory))
-                            self.didChange(.replacement, valuesAt: indexes, forKey: #keyPath(itemsForSelectedCategory))
+                            index1 < self.itemsForSelectedCategory.count - 1,
+                            self.itemsForSelectedCategory.count > 1,
+                            !((try? self.sortPredicate!(object,self.itemsForSelectedCategory[self.itemsForSelectedCategory.index(after: index1)])) ?? true) {
+                            try? self.itemsForSelectedCategory.sort(by: self.sortPredicate!)
+                            index2 = self.itemsForSelectedCategory.firstIndex(of: object)
+                            //let indexes = IndexSet(integersIn: index1 < index2! ? index1...index2! : index2!...index1)
+                            //self.willChange(.replacement, valuesAt:indexes, for: \.itemsForSelectedCategory)
+                            //self.didChange(.replacement, valuesAt: indexes, for: \.itemsForSelectedCategory)
                         }
                         if index2 != nil && selectionIndexes.contains(index1) {
-                            self.willChangeValue(forKey: #keyPath(selectionIndexes))
-                            self.willChangeValue(forKey: #keyPath(selectedItems))
+                            //self.willChangeValue(forKey: #keyPath(selectionIndexes))
+                            //self.willChangeValue(forKey: #keyPath(selectedItems))
                             self.selectionIndexes.remove(index1)
                             self._selectedObjects[index1] = nil
                             self.selectionIndexes.insert(index2!)
                             self._selectedObjects[index2!] = object
-                            self.didChangeValue(forKey: #keyPath(selectedItems))
+                            //self.didChangeValue(forKey: #keyPath(selectedItems))
                         }
-                        self.didChange(.setting, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
+                        //self.didChange(.setting, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
                         #if os(iOS) || targetEnvironment(macCatalyst)
                         for (table,section) in self.tableViews {
                             if let cell = table.cellForRow(at: IndexPath(row: index1, section: section)) as? TableViewDataCell {
@@ -311,7 +319,7 @@ import AppKit
                         #else
                         for (table,columns) in self.tableViews {
                             var indexes = IndexSet()
-                            let index2 = self._itemsForSelectedCategory.firstIndex(of: object)
+                            let index2 = self.itemsForSelectedCategory.firstIndex(of: object)
                             if index2 == index1 {
                                 for column in columns {
                                     if let cell = table.view(atColumn: column, row: index1, makeIfNecessary: false) as? TableViewDataCell {
@@ -336,17 +344,17 @@ import AppKit
                         #endif
                         
                 } else {
-                    self.willChange(.removal, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
-                    self._itemsForSelectedCategory.remove(at: index1)
+                    //self.willChange(.removal, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
+                    self.itemsForSelectedCategory.remove(at: index1)
                         if selectionIndexes.contains(index1) {
-                            self.willChangeValue(forKey: #keyPath(selectionIndexes))
-                            self.willChangeValue(forKey: #keyPath(selectedItems))
+                            //self.willChangeValue(forKey: #keyPath(selectionIndexes))
+                            //self.willChangeValue(forKey: #keyPath(selectedItems))
                             self.selectionIndexes.remove(index1)
                             self._selectedObjects[index1] = nil
-                            self.didChangeValue(forKey: #keyPath(selectionIndexes))
-                            self.didChangeValue(forKey: #keyPath(selectedItems))
+                            //self.didChangeValue(forKey: #keyPath(selectionIndexes))
+                            //self.didChangeValue(forKey: #keyPath(selectedItems))
                         }
-                    self.didChange(.removal, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
+                    //self.didChange(.removal, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
                     #if os(iOS) || targetEnvironment(macCatalyst)
                     for (table,section) in tableViews {
                         table.deleteRows(at: [IndexPath(row: index1, section: section)], with: .left)
@@ -360,10 +368,10 @@ import AppKit
                 }
             } else if self.finalPredicate(object) {
                 if self.sortPredicate != nil && self.isSorted,
-                    let index = self._itemsForSelectedCategory.firstIndex(where: { item in  try! self.sortPredicate!(object,item) }) {
-                    self.willChange(.insertion, valuesAt: IndexSet(integer: 0), forKey: #keyPath(itemsForSelectedCategory))
-                    self._itemsForSelectedCategory.insert(object, at: index)
-                    self.didChange(.insertion, valuesAt: IndexSet(integer: 0), forKey: #keyPath(itemsForSelectedCategory))
+                    let index = self.itemsForSelectedCategory.firstIndex(where: { item in  try! self.sortPredicate!(object,item) }) {
+                    //self.willChange(.insertion, valuesAt: IndexSet(integer: 0), for: \.itemsForSelectedCategory)
+                    self.itemsForSelectedCategory.insert(object, at: index)
+                    //self.didChange(.insertion, valuesAt: IndexSet(integer: 0), for: \.itemsForSelectedCategory)
                     #if os(iOS) || targetEnvironment(macCatalyst)
                     for (table,section) in tableViews {
                         table.insertRows(at: [IndexPath(row: index, section: section)], with: .left)
@@ -375,8 +383,8 @@ import AppKit
                     #endif
                    
                 } else {
-                    self.willChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), forKey: #keyPath(itemsForSelectedCategory))
-                    self._itemsForSelectedCategory.append(object)
+                    //self.willChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), for: \.itemsForSelectedCategory)
+                    self.itemsForSelectedCategory.append(object)
                     #if os(iOS) || targetEnvironment(macCatalyst)
                     for (table,section) in tableViews {
                         table.insertRows(at: [IndexPath(row: table.numberOfRows(inSection: section), section: section)], with: .left)
@@ -386,7 +394,7 @@ import AppKit
                         table.insertRows(at: IndexSet(integer: table.numberOfRows), withAnimation:  .effectFade)
                     }
                     #endif
-                    self.didChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), forKey: #keyPath(itemsForSelectedCategory))
+                    //self.didChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), for: \.itemsForSelectedCategory)
                 }
             }
         }
@@ -413,10 +421,10 @@ import AppKit
 ///
 /// - parameter title: Category title
 ///
-open func numberOfItemsInCategory(withTitle title: String) -> Int {
+@objc open func numberOfItemsInCategory(withTitle title: String) -> Int {
     if let category = categoryTitles[title] {
         let finalPredicate: Predicate = {element in self.filterPredicate (element) && category.predicate(element)}
-        return _items.filter(finalPredicate).count
+        return items.filter(finalPredicate).count
     }
     return 0
 }
@@ -430,7 +438,7 @@ open func numberOfItemsInCategory(atPosition index:Int) -> Int {
     
     let categoryPredicate = categories[index].predicate
     let finalPredicate: Predicate = {element in self.filterPredicate (element) && categoryPredicate(element)}
-    return _items.filter(finalPredicate).count
+    return items.filter(finalPredicate).count
 }
 
 
@@ -465,7 +473,7 @@ open func itemsforCategory(withTitle title: String) -> [Element] {
     var items = [Element]()
     if let category = categoryTitles[title] {
         let finalPredicate: Predicate = {element in self.filterPredicate (element) && category.predicate(element)}
-        items = self._items.filter(finalPredicate)
+        items = self.items.filter(finalPredicate)
     }
     if self.isSorted {
         do {
@@ -484,7 +492,7 @@ open func itemsforCategory(atPosition index: Int) -> [Element] {
     var items = [Element]()
     let categoryPredicate = categories[index].predicate
     let finalPredicate: Predicate = {element in self.filterPredicate (element) && categoryPredicate(element)}
-    items = self._items.filter(finalPredicate)
+    items = self.items.filter(finalPredicate)
     if self.isSorted {
         do {
             try items.sort(by: sortPredicate!)
@@ -498,18 +506,33 @@ open func itemsforCategory(atPosition index: Int) -> [Element] {
 /// and sorting final items according to sort predicate
 ///
 open func recategorizeItems() {
-    self.willChangeValue(forKey: #keyPath(itemsForSelectedCategory))
-    let items = self._items.filter(self.finalPredicate)
-    if self.isSorted {
-        self._itemsForSelectedCategory = self.sortItems(items)
-    } else {
-        self._itemsForSelectedCategory = items
+    //self.willChangeValue(for: \.itemsForSelectedCategory)
+
+    if self.selectedCategoryIndex == -1  {
+        DispatchQueue.main.async {
+            let items = self.items.filter({item in self.filterPredicate(item)})
+            if let sortPredicate = self.sortPredicate {
+                self.itemsForSelectedCategory = try! items.sorted(by: sortPredicate)
+            } else {
+                 self.itemsForSelectedCategory = items
+            }
+        }
+        return
     }
-    if let category = categories[self.selectedCategoryIndex] as? CompoundCategory,
-        !(category.isAllowingDuplicates) {
-        self._itemsForSelectedCategory.removeDuplicates()
+    var items = self.items.filter(self.finalPredicate)
+    if let sortPredicate = self.sortPredicate {
+        try? items.sort(by: sortPredicate)
     }
-    self.didChangeValue(forKey: #keyPath(itemsForSelectedCategory))
+    let seconds: Double = abs(items.count - itemsForSelectedCategory.count) > 1000 ? 0.005: 0.0
+    self.itemsForSelectedCategory = []
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, qos:.userInteractive) {
+        self.itemsForSelectedCategory = items
+       // if let category = self.categories[self.selectedCategoryIndex] as? CompoundCategory,
+       //     !(category.isAllowingDuplicates) {
+       //     self.itemsForSelectedCategory.removeDuplicates()
+       // }
+    }
+    //self.didChangeValue(for: \.itemsForSelectedCategory)
     #if os(iOS) || targetEnvironment(macCatalyst)
     for (table,_) in tableViews {
         //It should be the reloadSections method, but the HeaderView animation triggered by this method is annoying.
@@ -523,7 +546,7 @@ open func recategorizeItems() {
     #endif
     var newIndexes = IndexSet()
     for (_,item) in _selectedObjects {
-        if let index = _itemsForSelectedCategory.firstIndex(of: item) {
+        if let index = itemsForSelectedCategory.firstIndex(of: item) {
             if selectionIndexes.contains(index) {
                 _selectedObjects[index] = item
             }
@@ -540,12 +563,19 @@ open func recategorizeItems() {
 ///
 open func updateItem(_ item: Element) {
     if let index = items.firstIndex(of: item) {
-        self._items[index] = item
+        DispatchQueue.main.async {
+            self.items[index].update(with: item)
+        }
+    } else {
+        self.items.insert(item, at: 0)
     }
-    if let index1 = self._itemsForSelectedCategory.firstIndex(of: item) {
-        self.willChange(.setting, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
-        self._itemsForSelectedCategory[index1]=item
-        self.didChange(.setting, valuesAt: IndexSet(integer: index1), forKey: #keyPath(itemsForSelectedCategory))
+    if let index1 = self.itemsForSelectedCategory.firstIndex(of: item) {
+        //self.willChange(.setting, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
+        DispatchQueue.main.async {
+            self.itemsForSelectedCategory[index1].update(with: item)
+        }
+            
+        //self.didChange(.setting, valuesAt: IndexSet(integer: index1), for: \.itemsForSelectedCategory)
         #if os(iOS) || targetEnvironment(macCatalyst)
         for (table,section) in tableViews {
             if let cell = table.cellForRow(at: IndexPath(row: index1, section: section)) as? TableViewDataCell {
@@ -567,13 +597,16 @@ open func updateItem(_ item: Element) {
             }
         }
         #endif
-        if self.isSorted,
-            let index2 = self._itemsForSelectedCategory.firstIndex(where: { ritem in  try! self.sortPredicate!(item,ritem) }),
-            let index3 = self._itemsForSelectedCategory.lastIndex(where: { litem in  try! self.sortPredicate!(litem,item) }),
-            !((index3 < index1) && (index1 < index2)) {
-            self.moveItem(from: index1, to: index2)
-        }
         
+    } else if self.finalPredicate(item) {
+        self.itemsForSelectedCategory.insert(item, at: 0)
+    }
+    let index1 = self.itemsForSelectedCategory.firstIndex(of: item)!
+    if self.isSorted,
+        let index2 = self.itemsForSelectedCategory.firstIndex(where: { ritem in  try! self.sortPredicate!(item,ritem) }),
+        let index3 = self.itemsForSelectedCategory.lastIndex(where: { litem in  try! self.sortPredicate!(litem,item) }),
+        !((index3 < index1) && (index1 < index2)) {
+        self.moveItem(from: index1, to: index2)
     }
 }
 
@@ -584,12 +617,12 @@ open func updateItem(_ item: Element) {
 /// and returns a Boolean value indicating whether the element should be removed.
 ///
 open func removeItems(where condition: (Element) -> Bool) {
-    self._items.removeAll(where: condition)
-    let itemsToRemove = self._itemsForSelectedCategory.filter(condition)
+    self.items.removeAll(where: condition)
+    let itemsToRemove = self.itemsForSelectedCategory.filter(condition)
     for item in itemsToRemove {
-        if let index = self._itemsForSelectedCategory.firstIndex(of: item) {
-            self.willChange(.removal, valuesAt: IndexSet(integer: index), forKey: #keyPath(itemsForSelectedCategory))
-            self._itemsForSelectedCategory.remove(at: index)
+        if let index = self.itemsForSelectedCategory.firstIndex(of: item) {
+            //self.willChange(.removal, valuesAt: IndexSet(integer: index), for: \.itemsForSelectedCategory)
+            self.itemsForSelectedCategory.remove(at: index)
             #if os(iOS) || targetEnvironment(macCatalyst)
             for (table,section) in tableViews {
                 table.deleteRows(at: [IndexPath(row: index, section: section)], with: .left)
@@ -599,7 +632,7 @@ open func removeItems(where condition: (Element) -> Bool) {
                 table.removeRows(at: IndexSet(integer: index), withAnimation:  .effectFade)
             }
             #endif
-            self.didChange(.removal, valuesAt: IndexSet(integer: index), forKey: #keyPath(itemsForSelectedCategory))
+            //self.didChange(.removal, valuesAt: IndexSet(integer: index), for: \.itemsForSelectedCategory)
         }
     }
 }
@@ -610,13 +643,13 @@ open func removeItems(where condition: (Element) -> Bool) {
 /// - parameter item: The Item to add
 ///
 open func insertItem(_ item: Element) {
-    self._items.append(item)
+    self.items.append(item)
     if self.finalPredicate(item) {
         if self.sortPredicate != nil,
             self.isSorted,
-            let index = self._itemsForSelectedCategory.firstIndex(where: { item1 in  try! self.sortPredicate!(item,item1) }) {
-            self.willChange(.insertion, valuesAt: IndexSet(integer: index), forKey: #keyPath(itemsForSelectedCategory))
-            self._itemsForSelectedCategory.insert(item, at: index)
+            let index = self.itemsForSelectedCategory.firstIndex(where: { item1 in  try! self.sortPredicate!(item,item1) }) {
+            //self.willChange(.insertion, valuesAt: IndexSet(integer: index), for: \.itemsForSelectedCategory)
+            self.itemsForSelectedCategory.insert(item, at: index)
             #if os(iOS) || targetEnvironment(macCatalyst)
             for (table,section) in tableViews {
                 table.insertRows(at: [IndexPath(row: index, section: section)], with: .left)
@@ -626,10 +659,10 @@ open func insertItem(_ item: Element) {
                 table.insertRows(at: IndexSet(integer: index), withAnimation: .effectGap)
             }
             #endif
-            self.didChange(.insertion, valuesAt: IndexSet(integer: 0), forKey: #keyPath(itemsForSelectedCategory))
+            //self.didChange(.insertion, valuesAt: IndexSet(integer: 0), for: \.itemsForSelectedCategory)
         } else {
-            self.willChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), forKey: #keyPath(itemsForSelectedCategory))
-            self._itemsForSelectedCategory.append(item)
+            //self.willChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), for: \.itemsForSelectedCategory)
+            self.itemsForSelectedCategory.append(item)
             #if os(iOS) || targetEnvironment(macCatalyst)
             for (table,section) in tableViews {
                 table.insertRows(at: [IndexPath(row: table.numberOfRows(inSection: section), section: section)], with: .left)
@@ -639,7 +672,7 @@ open func insertItem(_ item: Element) {
                 table.insertRows(at: IndexSet(integer: table.numberOfRows), withAnimation: .effectGap)
             }
             #endif
-            self.didChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), forKey: #keyPath(itemsForSelectedCategory))
+            //self.didChange(.insertion, valuesAt: IndexSet(integer: itemsForSelectedCategory.count), for: \.itemsForSelectedCategory)
         }
     }
 }
@@ -650,17 +683,17 @@ open func insertItem(_ item: Element) {
 /// - parameter destionation: Destination index
 ///
 open func moveItem(from source: Int, to destination: Int) {
-    let item = self._itemsForSelectedCategory[source]
-    guard (0..<self._itemsForSelectedCategory.count) ~= source, (0...self._itemsForSelectedCategory.count) ~= destination else { return }
+    let item = self.itemsForSelectedCategory[source]
+    guard (0..<self.itemsForSelectedCategory.count) ~= source, (0...self.itemsForSelectedCategory.count) ~= destination else { return }
     if source == destination { return }
-    let targetIndex = source < destination ? destination - 1 : destination
+    //let targetIndex = source < destination ? destination - 1 : destination
 
-    self.willChange(.removal, valuesAt: IndexSet(integer: source), forKey: #keyPath(itemsForSelectedCategory))
-    self._itemsForSelectedCategory.remove(at: source)
-    self.didChange(.removal, valuesAt: IndexSet(integer: source), forKey: #keyPath(itemsForSelectedCategory))
-    self.willChange(.insertion, valuesAt: IndexSet(integer: destination), forKey: #keyPath(itemsForSelectedCategory))
-    self._itemsForSelectedCategory.insert(item, at: destination)
-    self.didChange(.insertion, valuesAt: IndexSet(integer: targetIndex), forKey: #keyPath(itemsForSelectedCategory))
+    //self.willChange(.removal, valuesAt: IndexSet(integer: source), for: \.itemsForSelectedCategory)
+    self.itemsForSelectedCategory.remove(at: source)
+    //self.didChange(.removal, valuesAt: IndexSet(integer: source), for: \.itemsForSelectedCategory)
+    //self.willChange(.insertion, valuesAt: IndexSet(integer: destination), for: \.itemsForSelectedCategory)
+    self.itemsForSelectedCategory.insert(item, at: destination)
+    //self.didChange(.insertion, valuesAt: IndexSet(integer: targetIndex), for: \.itemsForSelectedCategory)
     
     #if os(iOS) || targetEnvironment(macCatalyst)
     for (table,section) in tableViews {
@@ -677,24 +710,25 @@ open func moveItem(from source: Int, to destination: Int) {
 }
     
 open func moveItems(from source: IndexSet, to destination: Int) {
-    let movingData = source.map{ _itemsForSelectedCategory[$0] }
+    let movingData = source.map{ itemsForSelectedCategory[$0] }
     let targetIndex = destination - source.filter{ $0 < destination }.count
-    self.willChange(.removal, valuesAt: source, forKey: #keyPath(itemsForSelectedCategory))
+    //self.willChange(.removal, valuesAt: source, for: \.itemsForSelectedCategory)
     for (i, e) in source.enumerated() {
-        self._itemsForSelectedCategory.remove(at: e - i)
+        self.itemsForSelectedCategory.remove(at: e - i)
     }
-    self.didChange(.removal, valuesAt: source, forKey: #keyPath(itemsForSelectedCategory))
-    self.willChange(.insertion, valuesAt: IndexSet(integer: targetIndex), forKey: #keyPath(itemsForSelectedCategory))
-    self._itemsForSelectedCategory.insert(contentsOf: movingData, at: targetIndex)
-    self.didChange(.insertion, valuesAt: IndexSet(integer: targetIndex), forKey: #keyPath(itemsForSelectedCategory))
+    //self.didChange(.removal, valuesAt: source, for: \.itemsForSelectedCategory)
+    //self.willChange(.insertion, valuesAt: IndexSet(integer: targetIndex), for: \.itemsForSelectedCategory)
+    self.itemsForSelectedCategory.insert(contentsOf: movingData, at: targetIndex)
+    //self.didChange(.insertion, valuesAt: IndexSet(integer: targetIndex), for: \.itemsForSelectedCategory)
 }
 
 /// Initializer
 public override init() {
-    self._items = []
+    self.items = []
     super.init()
     self.categories = [Category]()
     self.filterPredicate  = {element in return true}
+    self.sortPredicate = { e1,e2 in return e1 > e2 }
 }
 
 
@@ -704,7 +738,6 @@ public override init() {
 /// - parameter categories: Array of Categories
 ///
 public init(withItems items:[Element], withCategories categories: [Category<Element>], andUserFilter filter: @escaping Predicate = {element in return true}) {
-    self._items = items
     super.init()
     self.categories = categories
     categoryTitles = [:]
@@ -712,6 +745,8 @@ public init(withItems items:[Element], withCategories categories: [Category<Elem
         categoryTitles[category.title] = category
     }
     self.filterPredicate  = filter
+    self.items = items
+    self.itemsForSelectedCategory = items
 }
 
 
@@ -726,11 +761,6 @@ open var visibleCategories: [Category<Element>] {
 ///
 open var numberOfVisibleCategories: Int {
     return self.visibleCategories.count
-}
-
-
-class func keyPathsForValuesAffectingItemsForSelectedCategory() -> Set<AnyHashable>? {
-    return Set<AnyHashable>(["_itemsForSelectedCategory"])
 }
 
 }

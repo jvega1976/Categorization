@@ -15,9 +15,9 @@ public typealias CategoryDef = Category
  @class Category
  Categories represent a categorization/grouping of Elements.  Category allow to present the items categorized information based in defined filter criterias.  Example of Categories in the Torrent world could be Active, Downloading, Tracker, etc.
  */
-@objcMembers public class Category<Element>: NSObject {
+@objcMembers public class Category<Element: Categorizable>: Identifiable, Equatable {
     
-    public typealias Element = Comparable
+    
     public typealias Predicate = (Element)->Bool
     /*!
      @property title Title to identify Category. Example: "All", "Downloading", "Seeding", "Stopped", etc.
@@ -29,7 +29,7 @@ public typealias CategoryDef = Category
      */
     
     private var _predicate: Predicate!
-    dynamic open var predicate: Predicate {
+    open var predicate: Predicate {
         return self._predicate
     }
 
@@ -46,8 +46,7 @@ public typealias CategoryDef = Category
     /*!
      initializer
      */
-    @objc public override init() {
-        super.init()
+    @objc public init() {
         self.title = ""
         self._predicate = {_ in return true}
         self.sortIndex = -1
@@ -60,13 +59,21 @@ public typealias CategoryDef = Category
          @param sortIndex Optional group label sort index
          @param visible  Boolean to establish if label will be always visible in the user interface even if there are not items that satisfy the label group criteria.
          */
+    
+    public var id: String {
+        return title
+    }
 
     public init(withTitle title: String, filterPredicate predicate: @escaping Predicate, sortIndex index: Int, isAlwaysVisible alwaysVisible: Bool) {
-        super.init()
         self.title = title
         self._predicate = predicate
         self.sortIndex = index
         self.isAlwaysVisible = alwaysVisible
     }
+    
+    public static func == (lhs: Category<Element>, rhs: Category<Element>) -> Bool {
+        lhs.title == rhs.title
+    }
+    
 
 }
