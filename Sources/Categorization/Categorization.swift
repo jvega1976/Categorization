@@ -53,11 +53,11 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     public typealias Predicate = (Element) ->Bool
     
     /// Array of Elements to categorized
-    @Published public private (set) var items: Array<Element> = [Element]()
+    @Published public private (set) var items: ContiguousArray<Element> = ContiguousArray<Element>()
     
     /// Array of items filtered and sorted according to selected category, user filter predidcate
     /// and sort predicate
-    @Published public private (set) var itemsForSelectedCategory: Array<Element> = [] 
+    @Published public private (set) var itemsForSelectedCategory: ContiguousArray<Element> = []
     
     /// Array of Categories
     @Published open var categories: [Category<Element>]!
@@ -149,7 +149,7 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
                 let tempItems = try? self.itemsForSelectedCategory.sorted(by: self.sortPredicate!)
                 self.itemsForSelectedCategory = []
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.005, qos: .userInteractive) {
-                    self.itemsForSelectedCategory = tempItems!
+                    self.itemsForSelectedCategory = ContiguousArray(tempItems!)
                 }
                 #if os(iOS) || targetEnvironment(macCatalyst)
                 for (table,section) in tableViews {
@@ -263,7 +263,7 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     /// - parameter items: Array of Elements to categorize
     ///
     open func setItems(_ items: [Element]) {
-        self.items = items
+        self.items = ContiguousArray(items)
         self.recategorizeItems()
     }
     
@@ -274,7 +274,7 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     ///
     open func updateItems(with items: [Element]) {
         if self.items.isEmpty {
-            self.items = items
+            self.items = ContiguousArray(items)
             self.recategorizeItems()
         } else {
             for object in items {
@@ -507,26 +507,14 @@ open func itemsforCategory(atPosition index: Int) -> [Element] {
 ///
 open func recategorizeItems() {
     //self.willChangeValue(for: \.itemsForSelectedCategory)
-
-    if self.selectedCategoryIndex == -1  {
-        DispatchQueue.main.async {
-            let items = self.items.filter({item in self.filterPredicate(item)})
-            if let sortPredicate = self.sortPredicate {
-                self.itemsForSelectedCategory = try! items.sorted(by: sortPredicate)
-            } else {
-                 self.itemsForSelectedCategory = items
-            }
-        }
-        return
-    }
     var items = self.items.filter(self.finalPredicate)
     if let sortPredicate = self.sortPredicate {
         try? items.sort(by: sortPredicate)
     }
-    let seconds: Double = abs(items.count - itemsForSelectedCategory.count) > 1000 ? 0.005: 0.0
+    let seconds: Double = abs(items.count - itemsForSelectedCategory.count) > 1000 ? 0.1: 0.0
     self.itemsForSelectedCategory = []
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds, qos:.userInteractive) {
-        self.itemsForSelectedCategory = items
+        self.itemsForSelectedCategory = ContiguousArray(items)
        // if let category = self.categories[self.selectedCategoryIndex] as? CompoundCategory,
        //     !(category.isAllowingDuplicates) {
        //     self.itemsForSelectedCategory.removeDuplicates()
@@ -745,8 +733,8 @@ public init(withItems items:[Element], withCategories categories: [Category<Elem
         categoryTitles[category.title] = category
     }
     self.filterPredicate  = filter
-    self.items = items
-    self.itemsForSelectedCategory = items
+    self.items = ContiguousArray(items)
+    self.itemsForSelectedCategory = ContiguousArray(items)
 }
 
 
