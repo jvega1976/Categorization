@@ -25,7 +25,11 @@ let package = Package(
         // Targets can depend on other targets in this package, and on products in packages which this package depends on.
         .target(
             name: "Categorization",
-            dependencies: []),
+            dependencies: [],
+            swiftSettings: [
+                .define("BUILD_LIBRARY_FOR_DISTRIBUTION=YES", .when(configuration: .release)),
+                .define("LOCALIZED_STRING_SWIFTUI_SUPPORT=YES", .when(configuration: .release)),
+        ]),
         .testTarget(
             name: "CategorizationTests",
             dependencies: ["Categorization"]),
