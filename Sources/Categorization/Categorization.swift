@@ -14,7 +14,7 @@ public protocol CategoryItem {
     func update(with item: Self)
 }
 
-public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiable & CategoryItem
+public typealias Categorizable = AnyObject &  Comparable & Hashable & Identifiable & CategoryItem
 
 /// Categorization Class
 
@@ -24,7 +24,7 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     public typealias Predicate = (Element) ->Bool
     
     /// Array of Elements to categorized
-    @Published public private (set) var items: Array<Element> = Array<Element>()
+    @Published public private (set) var items: Set<Element> = Set<Element>()
     
     /// Array of items filtered and sorted according to selected category, user filter predidcate
     /// and sort predicate
@@ -110,7 +110,7 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     /// - parameter items: Array of Elements to categorize
     ///
     open func setItems(_ items: Array<Element>) {
-        self.items = items
+        self.items = Set(items)
         self.recategorizeItems()
     }
     
@@ -121,31 +121,51 @@ public typealias Categorizable = AnyObject & Comparable & Hashable & Identifiabl
     ///
     open func updateItems(with items: Array<Element>) {
         if self.items.isEmpty {
-            self.items = items
+            self.items = Set(items)
             self.recategorizeItems()
         } else {
             for object in items {
-                if let index = self.items.firstIndex(of: object) {
-                    self.items[index] = object
+                if let index = self.items.firstIndex(where: { item in item == object }) {
+                    self.items[index].update(with: object)
                 } else {
-                    self.items.insert(object, at: 0)
-                }
-                if objc_sync_enter(self) == OBJC_SYNC_SUCCESS {
-                    if let index1 = self.itemsForSelectedCategory.firstIndex(of: object) {
-                        if self.finalPredicate(object) {
-                            self.itemsForSelectedCategory[index1].update(with: object)
+                    let (inserted,newObject) = self.items.insert(object)
+                    if self.finalPredicate(object),
+                       inserted {
+                        if self.isSorted {
+                            if self.sortPredicate != nil,
+                               let index1 = self.itemsForSelectedCategory.firstIndex(where: { try! self.sortPredicate!(object,$0) }) {
+                                self.itemsForSelectedCategory.insert(object, at: index1)
+                            } else if self.sortPredicate == nil,
+                                let index1 = self.itemsForSelectedCategory.firstIndex(where: { object < $0 }) {
+                                self.itemsForSelectedCategory.insert(newObject, at: index1)
+                            } else {
+                                self.itemsForSelectedCategory.insert(newObject, at: 0)
+                            }
                         } else {
-                            self.itemsForSelectedCategory.remove(at: index1)
+                            self.itemsForSelectedCategory.append(newObject)
                         }
-                    } else if self.finalPredicate(object) {
-                        self.itemsForSelectedCategory.insert(object, at: 0)
+                        continue
                     }
-                    objc_sync_exit(self)
-                } else {
-                    print("TransmissionRemote: Categorization could not lock itemsForSelectedCategory")
+                }
+                if let index1 = self.itemsForSelectedCategory.firstIndex(of: object),
+                   !self.finalPredicate(object) {
+                        self.itemsForSelectedCategory.remove(at: index1)
+                } else if self.finalPredicate(object),
+                          !self.itemsForSelectedCategory.contains(object) {
+                    if self.isSorted {
+                        if self.sortPredicate != nil,
+                           let index1 = self.itemsForSelectedCategory.firstIndex(where: { item in  try! self.sortPredicate!(object,item) }) {
+                            self.itemsForSelectedCategory.insert(object, at: index1)
+                        } else if let index1 = self.itemsForSelectedCategory.firstIndex(where: { object < $0 }) {
+                            self.itemsForSelectedCategory.insert(object, at: index1)
+                        } else {
+                            self.itemsForSelectedCategory.append(object)
+                        }
+                    } else {
+                        self.itemsForSelectedCategory.append(object)
+                    }
                 }
             }
-            try? self.itemsForSelectedCategory.sort(by: self.sortPredicate!)
         }
     }
     
@@ -254,12 +274,11 @@ open func itemsforCategory(atPosition index: Int) -> [Element] {
 /// and sorting final items according to sort predicate
 ///
 open func recategorizeItems() {
-    var items =  self.items.filter(self.finalPredicate)
+    let items =  self.items.filter(self.finalPredicate)
     if let sortPredicate = self.sortPredicate {
-        try? items.sort(by: sortPredicate)
+        self.itemsForSelectedCategory = (try? items.sorted(by: sortPredicate)) ?? Array(items)
     }
 
-        self.itemsForSelectedCategory = items
        // if let category = self.categories[self.selectedCategoryIndex] as? CompoundCategory,
        //     !(category.isAllowingDuplicates) {
        //     self.itemsForSelectedCategory.removeDuplicates()
@@ -273,10 +292,10 @@ open func recategorizeItems() {
 ///
 open func updateItem(_ item: Element) {
     if objc_sync_enter(self) == OBJC_SYNC_SUCCESS {
-        if let index = items.firstIndex(of: item) {
-            self.items[index].update(with: item)
+        if let object = items.first(where: { $0 == item }) {
+            object.update(with: item)
         } else {
-            self.items.insert(item, at: 0)
+            self.items.insert(item)
         }
         if let index1 = self.itemsForSelectedCategory.firstIndex(of: item) {
             self.itemsForSelectedCategory[index1].update(with: item)
@@ -304,13 +323,9 @@ open func updateItem(_ item: Element) {
 /// and returns a Boolean value indicating whether the element should be removed.
 ///
 open func removeItems(where condition: (Element) -> Bool) {
-    self.items.removeAll(where: condition)
-    let itemsToRemove = self.itemsForSelectedCategory.filter(condition)
-    for item in itemsToRemove {
-        if let index = self.itemsForSelectedCategory.firstIndex(of: item) {
-            self.itemsForSelectedCategory.remove(at: index)
-        }
-    }
+    let itemsToRemove = self.items.filter(condition)
+    self.items.subtract(itemsToRemove)
+    self.itemsForSelectedCategory.removeAll(where: condition)
 }
 
 
@@ -319,7 +334,7 @@ open func removeItems(where condition: (Element) -> Bool) {
 /// - parameter item: The Item to add
 ///
 open func insertItem(_ item: Element) {
-    self.items.append(item)
+    self.items.insert(item)
     if self.finalPredicate(item) {
         if self.sortPredicate != nil,
             self.isSorted,
@@ -376,7 +391,7 @@ public init(withItems items:[Element], withCategories categories: [Category<Elem
         categoryTitles[category.title] = category
     }
     self.filterPredicate  = filter
-    self.items = items
+    self.items = Set(items)
     self.itemsForSelectedCategory = items
 }
 
